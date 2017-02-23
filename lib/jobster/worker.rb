@@ -9,6 +9,8 @@ module Jobster
 
     def work
       logger.info "Jobster worker started"
+      self.class.run_callbacks(:after_start)
+
       @running_job = false
       Signal.trap("INT")  { @exit = true }
       Signal.trap("TERM") { @exit = true }
@@ -20,10 +22,12 @@ module Jobster
       loop do
         if @exit && @running_job == false
           logger.info "Exiting immediately because no job running"
+          self.class.run_callbacks(:before_quit, :immediate)
           exit 0
         elsif @exit
           if exit_checks >= 300
             logger.info "Job did not finish in a timely manner. Exiting"
+            self.class.run_callbacks(:before_quit, :timeout)
             exit 0
           end
           if exit_checks == 0
@@ -50,12 +54,17 @@ module Jobster
           logger.info "[#{message['id']}] Started processing \e[34m#{message['class_name']}\e[0m job"
           begin
             klass = Object.const_get(message['class_name']).new(message['id'], message['params'])
+            self.class.run_callbacks(:before_job, klass)
             klass.perform
+            self.class.run_callbacks(:after_job, klass)
+          rescue Job::Abort => e
+            logger.info "[#{message['id']}] Job aborted (#{e.message})"
           rescue => e
             logger.warn "[#{message['id']}] \e[31m#{e.class}: #{e.message}\e[0m"
             e.backtrace.each do |line|
               logger.warn "[#{message['id']}]    " + line
             end
+            self.class.run_callbacks(:after_job, klass, e)
             self.class.error_handlers.each { |handler| handler.call(e, klass) }
           ensure
             logger.info "[#{message['id']}] Finished processing \e[34m#{message['class_name']}\e[0m job in #{Time.now - start_time}s"
@@ -68,6 +77,7 @@ module Jobster
         @running_job = false
         if @exit
           logger.info "Exiting because a job has ended."
+          self.class.run_callbacks(:before_quit, :job_completed)
           exit 0
         end
       end
@@ -77,10 +87,12 @@ module Jobster
       if @active_queues[queue]
         logger.info "Attempted to join queue #{queue} but already joined."
       else
+        self.class.run_callbacks(:before_queue_join, queue)
         consumer = Jobster.queue(queue).subscribe(:manual_ack => true) do |delivery_info, properties, body|
           receive_job(delivery_info, properties, body)
         end
         @active_queues[queue] = consumer
+        self.class.run_callbacks(:after_queue_join, queue, consumer)
         logger.info "Joined \e[32m#{queue}\e[0m queue"
       end
     end
@@ -109,6 +121,23 @@ module Jobster
 
     def self.register_error_handler(&block)
       error_handlers << block
+    end
+
+    def self.callbacks
+      @callbacks ||= {}
+    end
+
+    def self.add_callback(event, &block)
+      callbacks[event] ||= []
+      callbacks[event] << block
+    end
+
+    def self.run_callbacks(event, *args)
+      if callbacks[event]
+        callbacks[event].each do |callback|
+          callback.call(*args)
+        end
+      end
     end
 
   end

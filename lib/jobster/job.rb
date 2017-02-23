@@ -1,6 +1,8 @@
 module Jobster
   class Job
 
+    class Abort < StandardError; end
+
     attr_reader :id
     attr_reader :params
 
