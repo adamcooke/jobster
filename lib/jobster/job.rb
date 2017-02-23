@@ -17,7 +17,13 @@ module Jobster
       Jobster.logger.info "[#{@id}] #{text}"
     end
 
-    def self.queue(queue, params = {})
+    def self.queue(queue = {}, params = {})
+
+      if queue.is_a?(Hash)
+        params = queue
+        queue = :main
+      end
+
       job_id = SecureRandom.uuid[0,8]
       job_payload = {'params' => params, 'class_name' => self.name, 'id' => job_id, 'queue' => queue}
       Jobster.queue(queue).publish(job_payload.to_json, :persistent => false)
