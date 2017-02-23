@@ -1,0 +1,36 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'jobster'
+
+$stdout.sync = true
+$stderr.sync = true
+
+options = {}
+
+OptionParser.new do |opts|
+  opts.version = Jobster::VERSION
+  opts.banner = "Usage: jobster [options]"
+  opts.on("-c", "--config PATH", "The path to your jobster config file") do |config|
+    options[:config] = config
+  end
+  opts.on("-q", "--queues QUEUE1,QUEUE2", "Additional queues that you wish to subscribe to") do |queues|
+    queues.split(/,/).uniq.each do |queue|
+      Jobster::Worker.queues << queue
+    end
+  end
+
+end.parse!
+
+if options[:config]
+  if File.file?(options[:config])
+    file = File.expand_path(options[:config])
+    require file
+  else
+    puts "Jobster config file not found at #{options[:config]}"
+    exit 1
+  end
+end
+
+worker = Jobster::Worker.new
+worker.work

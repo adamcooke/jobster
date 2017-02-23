@@ -8,6 +8,7 @@ Gem::Specification.new do |s|
   s.licenses      = ['MIT']
   s.version       = Jobster::VERSION
   s.files         = Dir.glob("{bin,lib,vendor}/**/*")
+  s.executables   = ['jobster']
   s.require_paths = ["lib"]
   s.authors       = ["Adam Cooke"]
   s.email         = ["me@adamcooke.io"]
