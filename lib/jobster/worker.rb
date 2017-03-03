@@ -4,24 +4,35 @@ module Jobster
     def initialize(queues = nil)
       @initial_queues = queues || self.class.queues || [:main]
       @active_queues = {}
+      @running_jobs = []
       @process_name = $0
+      set_process_name
+    end
+
+    def set_process_name
+      prefix = @process_name.to_s
+      prefix += " [exiting]" if @exit
+      if @running_jobs.empty?
+        $0 = "#{prefix} (idle)"
+      else
+        $0 = "#{prefix} (running #{@running_jobs.join(', ')})"
+      end
     end
 
     def work
-      logger.info "Jobster worker started"
+      logger.info "Jobster worker started (#{self.class.threads} thread(s))"
       self.class.run_callbacks(:after_start)
 
-      @running_job = false
-      Signal.trap("INT")  { @exit = true }
-      Signal.trap("TERM") { @exit = true }
+      Signal.trap("INT")  { @exit = true; set_process_name }
+      Signal.trap("TERM") { @exit = true; set_process_name }
 
-      Jobster.channel.prefetch(1)
+      Jobster.channel.prefetch(self.class.threads)
       @initial_queues.uniq.each { |queue | join_queue(queue) }
 
       exit_checks = 0
       loop do
-        if @exit && @running_job == false
-          logger.info "Exiting immediately because no job running"
+        if @exit && @running_jobs.empty?
+          logger.info "Exiting immediately because no jobs running"
           self.class.run_callbacks(:before_quit, :immediate)
           exit 0
         elsif @exit
@@ -43,14 +54,14 @@ module Jobster
 
     private
 
-    def receive_job(delivery_info, properties, body)
-      @running_job = true
+    def receive_job(properties, body)
       begin
         message = JSON.parse(body) rescue nil
         if message && message['class_name']
           start_time = Time.now
-          $0 = "#{@process_name} (running #{message['class_name']})"
           Thread.current[:job_id] = message['id']
+          @running_jobs << message['id']
+          set_process_name
           logger.info "[#{message['id']}] Started processing \e[34m#{message['class_name']}\e[0m job"
           begin
             klass = Object.const_get(message['class_name']).new(message['id'], message['params'])
@@ -72,11 +83,10 @@ module Jobster
         end
       ensure
         Thread.current[:job_id] = nil
-        $0 = @process_name
-        Jobster.channel.ack(delivery_info.delivery_tag)
-        @running_job = false
-        if @exit
-          logger.info "Exiting because a job has ended."
+        @running_jobs.delete(message['id']) if message['id']
+        set_process_name
+        if @exit && @running_jobs.empty?
+          logger.info "Exiting because all jobs have finished."
           self.class.run_callbacks(:before_quit, :job_completed)
           exit 0
         end
@@ -89,7 +99,11 @@ module Jobster
       else
         self.class.run_callbacks(:before_queue_join, queue)
         consumer = Jobster.queue(queue).subscribe(:manual_ack => true) do |delivery_info, properties, body|
-          receive_job(delivery_info, properties, body)
+          begin
+            receive_job(properties, body)
+          ensure
+            Jobster.channel.ack(delivery_info.delivery_tag)
+          end
         end
         @active_queues[queue] = consumer
         self.class.run_callbacks(:after_queue_join, queue, consumer)
@@ -113,6 +127,14 @@ module Jobster
 
     def self.queues
       @queues ||= [:main]
+    end
+
+    def self.threads
+      @threads || 1
+    end
+
+    def self.threads=(threads)
+      @threads = threads
     end
 
     def self.error_handlers

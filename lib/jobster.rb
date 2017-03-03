@@ -32,7 +32,7 @@ module Jobster
     attr_writer :queue_prefix
 
     def channel
-      @channel ||= bunny.create_channel
+      @channel ||= bunny.create_channel(nil, Worker.threads)
     end
 
     def queue(name)
