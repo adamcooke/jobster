@@ -22,6 +22,7 @@ module Jobster
     def work
       logger.info "Jobster worker started (#{self.class.threads} thread(s))"
       self.class.run_callbacks(:after_start)
+      Jobster.delay_queue # Declare it
 
       Signal.trap("INT")  { @exit = true; set_process_name }
       Signal.trap("TERM") { @exit = true; set_process_name }
