@@ -16,22 +16,27 @@ module Jobster
     attr_writer :logger
 
     def exchange_name
-      @exchange_name || "jobster-exch"
+      @exchange_name || "jobster"
     end
     attr_writer :exchange_name
 
     def delay_exchange_name
-      @delay_exchange_name || "#{self.exchange_name}-delay"
+      @delay_exchange_name || "#{self.exchange_name}-delay-exch"
     end
     attr_writer :delay_exchange_name
 
     def delay_queue_name
-      @delay_queue_name || "jobster-delay-queue"
+      @delay_queue_name || "#{self.exchange_name}-delay-queue"
     end
     attr_writer :delay_queue_name
 
+    def queue_name_prefix
+      @queue_name_prefix || "#{self.exchange_name}-queue"
+    end
+    attr_writer :queue_name_prefix
+
     def worker_threads
-      @worker_threads || 2
+      @worker_threads || 1
     end
     attr_writer :worker_threads
 

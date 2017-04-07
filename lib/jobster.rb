@@ -37,7 +37,7 @@ module Jobster
   def self.queue(name)
     @queues ||= {}
     @queues[name] ||= begin
-      queue = channel.queue('', :durable => true, :auto_delete => false)
+      queue = channel.queue("#{config.queue_name_prefix}-#{name}", :durable => true, :auto_delete => false)
       queue.bind(exchange, :routing_key => name)
       queue
     end
