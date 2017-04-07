@@ -20,26 +20,27 @@ module Jobster
     end
 
     def work
-      logger.info "Jobster worker started (#{self.class.threads} thread(s))"
-      self.class.run_callbacks(:after_start)
+      logger.info "Jobster worker started (#{Jobster.config.worker_threads} thread(s))"
+      run_callbacks :after_start
+
       Jobster.delay_queue # Declare it
 
       Signal.trap("INT")  { @exit = true; set_process_name }
       Signal.trap("TERM") { @exit = true; set_process_name }
 
-      Jobster.channel.prefetch(self.class.threads)
+      Jobster.channel.prefetch(Jobster.config.worker_threads)
       @initial_queues.uniq.each { |queue | join_queue(queue) }
 
       exit_checks = 0
       loop do
         if @exit && @running_jobs.empty?
           logger.info "Exiting immediately because no jobs running"
-          self.class.run_callbacks(:before_quit, :immediate)
+          run_callbacks :before_quit, :immediate
           exit 0
         elsif @exit
           if exit_checks >= 300
             logger.info "Job did not finish in a timely manner. Exiting"
-            self.class.run_callbacks(:before_quit, :timeout)
+            run_callbacks :before_quit, :timeout
             exit 0
           end
           if exit_checks == 0
@@ -66,9 +67,9 @@ module Jobster
           logger.info "[#{message['id']}] Started processing \e[34m#{message['class_name']}\e[0m job"
           begin
             klass = Object.const_get(message['class_name']).new(message['id'], message['params'])
-            self.class.run_callbacks(:before_job, klass)
+            run_callbacks :before_job, klass
             klass.perform
-            self.class.run_callbacks(:after_job, klass)
+            run_callbacks :after_job, klass
           rescue Job::Abort => e
             logger.info "[#{message['id']}] Job aborted (#{e.message})"
           rescue => e
@@ -76,8 +77,8 @@ module Jobster
             e.backtrace.each do |line|
               logger.warn "[#{message['id']}]    " + line
             end
-            self.class.run_callbacks(:after_job, klass, e)
-            self.class.error_handlers.each { |handler| handler.call(e, klass) }
+            run_callbacks :after_job, klass, e
+            Jobster.config.worker_error_handlers.each { |handler| handler.call(e, klass) }
           ensure
             logger.info "[#{message['id']}] Finished processing \e[34m#{message['class_name']}\e[0m job in #{Time.now - start_time}s"
           end
@@ -88,7 +89,7 @@ module Jobster
         set_process_name
         if @exit && @running_jobs.empty?
           logger.info "Exiting because all jobs have finished."
-          self.class.run_callbacks(:before_quit, :job_completed)
+          run_callbacks :before_quit, :job_completed
           exit 0
         end
       end
@@ -98,7 +99,7 @@ module Jobster
       if @active_queues[queue]
         logger.info "Attempted to join queue #{queue} but already joined."
       else
-        self.class.run_callbacks(:before_queue_join, queue)
+        run_callbacks :before_queue_join, queue
         consumer = Jobster.queue(queue).subscribe(:manual_ack => true) do |delivery_info, properties, body|
           begin
             receive_job(properties, body)
@@ -107,7 +108,7 @@ module Jobster
           end
         end
         @active_queues[queue] = consumer
-        self.class.run_callbacks(:after_queue_join, queue, consumer)
+        run_callbacks :after_queue_join, queue, consumer
         logger.info "Joined \e[32m#{queue}\e[0m queue"
       end
     end
@@ -123,41 +124,16 @@ module Jobster
     end
 
     def logger
-      Jobster.logger
+      Jobster.config.logger
     end
 
     def self.queues
       @queues ||= [:main]
     end
 
-    def self.threads
-      @threads || 1
-    end
-
-    def self.threads=(threads)
-      @threads = threads
-    end
-
-    def self.error_handlers
-      @error_handlers ||= []
-    end
-
-    def self.register_error_handler(&block)
-      error_handlers << block
-    end
-
-    def self.callbacks
-      @callbacks ||= {}
-    end
-
-    def self.add_callback(event, &block)
-      callbacks[event] ||= []
-      callbacks[event] << block
-    end
-
-    def self.run_callbacks(event, *args)
-      if callbacks[event]
-        callbacks[event].each do |callback|
+    def run_callbacks(event, *args)
+      if callbacks = Jobster.config.worker_callbacks[event]
+        callbacks.each do |callback|
           callback.call(*args)
         end
       end
