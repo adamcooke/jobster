@@ -54,34 +54,39 @@ module Jobster
       end
     end
 
+    def perform_job(class_name, params = {}, id = nil)
+      id ||= SecureRandom.uuid[0,8]
+      start_time = Time.now
+      logger.info "[#{id}] Started processing \e[34m#{class_name}\e[0m job"
+      begin
+        klass = Object.const_get(class_name).new(id, params)
+        run_callbacks :before_job, klass
+        klass.perform
+        run_callbacks :after_job, klass
+      rescue Job::Abort => e
+        logger.info "[#{id}] Job aborted (#{e.message})"
+      rescue => e
+        logger.warn "[#{id}] \e[31m#{e.class}: #{e.message}\e[0m"
+        e.backtrace.each do |line|
+          logger.warn "[#{id}]    " + line
+        end
+        run_callbacks :after_job, klass, e
+        Jobster.config.worker_error_handlers.each { |handler| handler.call(e, klass) }
+      ensure
+        logger.info "[#{id}] Finished processing \e[34m#{class_name}\e[0m job in #{Time.now - start_time}s"
+      end
+    end
+
     private
 
     def receive_job(properties, body)
       begin
         message = JSON.parse(body) rescue nil
         if message && message['class_name']
-          start_time = Time.now
           Thread.current[:job_id] = message['id']
           @running_jobs << message['id']
           set_process_name
-          logger.info "[#{message['id']}] Started processing \e[34m#{message['class_name']}\e[0m job"
-          begin
-            klass = Object.const_get(message['class_name']).new(message['id'], message['params'])
-            run_callbacks :before_job, klass
-            klass.perform
-            run_callbacks :after_job, klass
-          rescue Job::Abort => e
-            logger.info "[#{message['id']}] Job aborted (#{e.message})"
-          rescue => e
-            logger.warn "[#{message['id']}] \e[31m#{e.class}: #{e.message}\e[0m"
-            e.backtrace.each do |line|
-              logger.warn "[#{message['id']}]    " + line
-            end
-            run_callbacks :after_job, klass, e
-            Jobster.config.worker_error_handlers.each { |handler| handler.call(e, klass) }
-          ensure
-            logger.info "[#{message['id']}] Finished processing \e[34m#{message['class_name']}\e[0m job in #{Time.now - start_time}s"
-          end
+          perform_job(message['class_name'], message['params'] || {}, message['id'])
         end
       ensure
         Thread.current[:job_id] = nil
