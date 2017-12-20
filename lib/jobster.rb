@@ -3,6 +3,7 @@ require 'jobster/job'
 require 'jobster/worker'
 require 'jobster/version'
 require 'jobster/config'
+require 'jobster/background'
 
 module Jobster
 

@@ -114,3 +114,20 @@ The follow additional callbacks can be registered:
 * `before_quit(type)` - called before the worker quites (type is the type of exit - immediate, job_completed, timeout)
 
 In the `before_job` callback, you can raise a `Jobster::Job::Abort` exception to halt the execution of the job.
+
+
+## Inline job queueing
+
+If you have a simple method that you wish to queue without creating a full Job klass, you can do so using the `__background__` method. For example:
+
+```
+# Create a method that can be run in the background
+class User
+  def self.expire_tokens(options = {})
+    # Do something here
+  end
+end
+
+# Queue it...
+job_id = User.__background__.expire_tokens(:date => 2.weeks.ago)
+```

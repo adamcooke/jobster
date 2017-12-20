@@ -58,9 +58,9 @@ module Jobster
       id ||= SecureRandom.uuid[0,8]
       start_time = Time.now
       exception = nil
-      logger.info "[#{id}] Started processing \e[34m#{class_name}\e[0m job"
       begin
         klass = Object.const_get(class_name).new(id, params)
+        logger.info "[#{id}] Started processing \e[34m#{klass.description}\e[0m job"
         run_callbacks :before_job, klass
         klass.perform
       rescue Job::Abort => e
@@ -75,7 +75,7 @@ module Jobster
         Jobster.config.worker_error_handlers.each { |handler| handler.call(e, klass) }
       ensure
         run_callbacks :after_job, klass, exception
-        logger.info "[#{id}] Finished processing \e[34m#{class_name}\e[0m job in #{Time.now - start_time}s"
+        logger.info "[#{id}] Finished processing \e[34m#{klass.description}\e[0m job in #{Time.now - start_time}s"
       end
     end
 
